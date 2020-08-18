@@ -32,6 +32,7 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.anyDescendantOfType
 import org.jetbrains.kotlin.psi.psiUtil.getTopmostParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.isAncestor
+import org.jetbrains.kotlin.resolve.jvm.KotlinJavaPsiFacade
 
 val KOTLIN_CONSOLE_KEY = Key.create<Boolean>("kotlin.console")
 
@@ -54,7 +55,7 @@ abstract class KotlinCodeBlockModificationListenerCompat(protected val project: 
 
     protected fun init(
         treeAspect: TreeAspect,
-        incOCBCounter: (KtFile) -> Unit,
+        incOutCodeBlockCounter: (KtFile) -> Unit,
         psiModificationTrackerListener: PsiModificationTracker.Listener,
         kotlinOutOfCodeBlockTrackerProducer: () -> SimpleModificationTracker,
         isLanguageTrackerEnabled: Boolean = true,
@@ -62,7 +63,8 @@ abstract class KotlinCodeBlockModificationListenerCompat(protected val project: 
         kotlinOutOfCodeBlockTrackerImpl = kotlinOutOfCodeBlockTrackerProducer()
         kotlinOutOfCodeBlockTracker = kotlinOutOfCodeBlockTrackerImpl
         val model = PomManager.getModel(project)
-        val messageBusConnection = project.messageBus.connect(project)
+        val messageBusConnection = project.messageBus.connect()
+
         model.addModelListener(object : PomModelListener {
             override fun isAspectChangeInteresting(aspect: PomModelAspect): Boolean {
                 return aspect == treeAspect
@@ -89,9 +91,10 @@ abstract class KotlinCodeBlockModificationListenerCompat(protected val project: 
                     messageBusConnection.deliverImmediately()
 
                     if (physical && !isReplLine(ktFile.virtualFile) && ktFile !is KtTypeCodeFragment) {
-                        incOCBCounter(ktFile)
+                        incOutCodeBlockCounter(ktFile)
                     }
 
+                    KotlinJavaPsiFacade.getInstance(project).clearClassCaches()
                     ktFile.incOutOfBlockModificationCount()
                 } else if (physical) {
                     inBlockElements.forEach { it.containingKtFile.addInBlockModifiedItem(it) }
@@ -176,7 +179,7 @@ abstract class KotlinCodeBlockModificationListenerCompat(protected val project: 
             // dirty scope for whitespaces and comments is the element itself
             if (element is PsiWhiteSpace || element is PsiComment || element is KDoc) return element
 
-            return getInsideCodeBlockModificationScope(element)?.blockDeclaration ?: null
+            return getInsideCodeBlockModificationScope(element)?.blockDeclaration
         }
 
         fun getInsideCodeBlockModificationScope(element: PsiElement): BlockModificationScopeElement? {
@@ -267,7 +270,7 @@ abstract class KotlinCodeBlockModificationListenerCompat(protected val project: 
 
                 is KtSecondaryConstructor -> {
                     blockDeclaration
-                        ?.takeIf {
+                        .takeIf {
                             it.bodyExpression?.isAncestor(element) ?: false || it.getDelegationCallOrNull()?.isAncestor(element) ?: false
                         }?.let { ktConstructor ->
                             PsiTreeUtil.getParentOfType(blockDeclaration, KtClassOrObject::class.java)?.let {

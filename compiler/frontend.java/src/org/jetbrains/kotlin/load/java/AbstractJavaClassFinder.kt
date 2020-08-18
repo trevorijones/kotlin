@@ -30,7 +30,7 @@ import javax.inject.Inject
 abstract class AbstractJavaClassFinder : JavaClassFinder {
 
     protected lateinit var project: Project
-    protected lateinit var javaSearchScope: GlobalSearchScope
+    protected lateinit var javaSearchScope: FilterOutKotlinSourceFilesScope
 
 
     @Inject

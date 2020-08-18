@@ -23,7 +23,7 @@ class KotlinCodeBlockModificationListener(
     init {
         init(
             treeAspect,
-            incOCBCounter = { ktFile ->
+            incOutCodeBlockCounter = { ktFile ->
                 kotlinOutOfCodeBlockTrackerImpl.incModificationCount()
                 perModuleOutOfCodeBlockTrackerUpdater.onKotlinPhysicalFileOutOfBlockChange(ktFile, true)
             },
