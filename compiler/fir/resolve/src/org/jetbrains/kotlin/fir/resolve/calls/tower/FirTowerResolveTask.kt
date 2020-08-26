@@ -20,6 +20,7 @@ import org.jetbrains.kotlin.fir.types.impl.FirImplicitBuiltinTypeRef
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.resolve.calls.tasks.ExplicitReceiverKind
 import org.jetbrains.kotlin.resolve.descriptorUtil.HIDES_MEMBERS_NAME_LIST
+import java.util.*
 
 
 internal class TowerDataElementsForName(
@@ -28,7 +29,14 @@ internal class TowerDataElementsForName(
 ) {
     val nonLocalTowerDataElements = towerDataContext.nonLocalTowerDataElements.asReversedFrozen()
     val reversedFilteredLocalScopes by lazy(LazyThreadSafetyMode.NONE) {
-        towerDataContext.localScopes.asReversed().withIndex().filter { (_, scope) -> scope.mayContainName(name) }
+        val result = LinkedList<IndexedValue<FirScope>>()
+        val lastIndex = towerDataContext.localScopes.lastIndex
+        for ((index, scope) in towerDataContext.localScopes.withIndex()) {
+            if (scope.mayContainName(name)) {
+                result.addFirst(IndexedValue(lastIndex - index, scope))
+            }
+        }
+        result
     }
     val implicitReceivers by lazy(LazyThreadSafetyMode.NONE) {
         nonLocalTowerDataElements.mapIndexedNotNull { index, towerDataElement ->
