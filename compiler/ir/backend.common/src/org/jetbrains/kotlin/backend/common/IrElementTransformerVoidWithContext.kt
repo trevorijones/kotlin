@@ -140,70 +140,53 @@ abstract class IrElementTransformerVoidWithContext : IrElementTransformerVoid() 
     }
 }
 
-@OptIn(ObsoleteDescriptorBasedAPI::class)
-abstract class IrElementVisitorVoidWithContext : IrElementVisitorVoid {
+abstract class IrElementVisitorVoidWithContext<ElementContext> : IrElementVisitorVoid {
+    private val elementContextStack = mutableListOf<ElementContext>()
 
-    private val scopeStack = mutableListOf<ScopeWithIr>()
+    protected val allContexts: List<ElementContext> get() = elementContextStack
 
-    protected open fun createScope(declaration: IrSymbolOwner): ScopeWithIr =
-        ScopeWithIr(Scope(declaration.symbol), declaration)
+    protected abstract fun createElementContext(declaration: IrSymbolOwner): ElementContext
 
     final override fun visitFile(declaration: IrFile) {
-        scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitFileNew(declaration)
-        scopeStack.pop()
+        elementContextStack.pop()
     }
 
     final override fun visitClass(declaration: IrClass) {
-        scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitClassNew(declaration)
-        scopeStack.pop()
+        elementContextStack.pop()
     }
 
     final override fun visitProperty(declaration: IrProperty) {
-        scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitPropertyNew(declaration)
-        scopeStack.pop()
+        elementContextStack.pop()
     }
 
     final override fun visitField(declaration: IrField) {
-        val isDelegated = declaration.descriptor.isDelegated
-        if (isDelegated) scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitFieldNew(declaration)
-        if (isDelegated) scopeStack.pop()
+        elementContextStack.pop()
     }
 
     final override fun visitFunction(declaration: IrFunction) {
-        scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitFunctionNew(declaration)
-        scopeStack.pop()
+        elementContextStack.pop()
     }
 
     final override fun visitAnonymousInitializer(declaration: IrAnonymousInitializer) {
-        scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitAnonymousInitializerNew(declaration)
-        scopeStack.pop()
+        elementContextStack.pop()
     }
 
     final override fun visitValueParameter(declaration: IrValueParameter) {
-        scopeStack.push(createScope(declaration))
+        elementContextStack.push(createElementContext(declaration))
         visitValueParameterNew(declaration)
-        scopeStack.pop()
-    }
-
-    protected val currentFile get() = scopeStack.lastOrNull { it.scope.scopeOwnerSymbol is IrFileSymbol }
-    protected val currentClass get() = scopeStack.lastOrNull { it.scope.scopeOwnerSymbol is IrClassSymbol }
-    protected val currentFunction get() = scopeStack.lastOrNull { it.scope.scopeOwnerSymbol is IrFunctionSymbol }
-    protected val currentProperty get() = scopeStack.lastOrNull { it.scope.scopeOwnerSymbol is IrPropertySymbol }
-    protected val currentAnonymousInitializer get() = scopeStack.lastOrNull { it.scope.scopeOwnerSymbol is IrAnonymousInitializer }
-    protected val currentValueParameter get() = scopeStack.lastOrNull { it.scope.scopeOwnerSymbol is IrValueParameter }
-    protected val currentScope get() = scopeStack.peek()
-    protected val parentScope get() = if (scopeStack.size < 2) null else scopeStack[scopeStack.size - 2]
-    protected val allScopes get() = scopeStack
-
-    @ObsoleteDescriptorBasedAPI
-    fun printScopeStack() {
-        scopeStack.forEach { println(it.scope.scopeOwner) }
+        elementContextStack.pop()
     }
 
     open fun visitFileNew(declaration: IrFile) {

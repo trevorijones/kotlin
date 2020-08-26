@@ -5,15 +5,17 @@
 
 package org.jetbrains.kotlin.backend.common.lower
 
-import org.jetbrains.kotlin.backend.common.*
+import org.jetbrains.kotlin.backend.common.BodyLoweringPass
+import org.jetbrains.kotlin.backend.common.CommonBackendContext
+import org.jetbrains.kotlin.backend.common.IrElementVisitorVoidWithContext
 import org.jetbrains.kotlin.backend.common.descriptors.synthesizedString
 import org.jetbrains.kotlin.backend.common.ir.*
+import org.jetbrains.kotlin.backend.common.runOnFilePostfix
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.ReceiverParameterDescriptor
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.descriptors.Visibility
 import org.jetbrains.kotlin.ir.*
-import org.jetbrains.kotlin.ir.builders.Scope
 import org.jetbrains.kotlin.ir.builders.declarations.buildConstructor
 import org.jetbrains.kotlin.ir.builders.declarations.buildField
 import org.jetbrains.kotlin.ir.builders.declarations.buildFun
@@ -109,7 +111,7 @@ class LocalDeclarationsLowering(
         LocalDeclarationsTransformer(irElement, container, classesToLower).lowerLocalDeclarations()
     }
 
-    internal class ScopeWithCounter(scope: Scope, irElement: IrElement) : ScopeWithIr(scope, irElement) {
+    internal class ScopeWithCounter(val irElement: IrElement) {
         // Continuous numbering across all declarations in the container.
         var counter: Int = 0
         val usedLocalFunctionNames: MutableSet<Name> = hashSetOf()
@@ -122,7 +124,7 @@ class LocalDeclarationsLowering(
     // Need to keep LocalFunctionContext.index
     private val IrSymbolOwner.scopeWithCounter: ScopeWithCounter
         get() = context.ir.localScopeWithCounterMap.scopeMap.getOrPut(this) {
-            ScopeWithCounter(Scope(symbol), this)
+            ScopeWithCounter(this)
         }
 
     private abstract class LocalContext {
@@ -857,13 +859,13 @@ class LocalDeclarationsLowering(
                 currentParent as? IrClass
             }
 
-            irElement.acceptVoid(object : IrElementVisitorVoidWithContext() {
+            irElement.acceptVoid(object : IrElementVisitorVoidWithContext<ScopeWithCounter>() {
                 override fun visitElement(element: IrElement) {
                     element.acceptChildrenVoid(this)
                 }
 
-                override fun createScope(declaration: IrSymbolOwner): ScopeWithIr {
-                    return ScopeWithCounter(Scope(declaration.symbol), declaration) // Don't cache local declarations
+                override fun createElementContext(declaration: IrSymbolOwner): ScopeWithCounter {
+                    return ScopeWithCounter(declaration) // Don't cache local declarations
                 }
 
                 override fun visitFunctionExpression(expression: IrFunctionExpression) {
@@ -879,16 +881,17 @@ class LocalDeclarationsLowering(
                     super.visitSimpleFunction(declaration)
 
                     if (declaration.visibility == Visibilities.LOCAL) {
-                        val enclosingScope =
+                        val enclosingScope = allContexts.lastOrNull { it.irElement is IrClass }
+                            ?: enclosingClass?.scopeWithCounter
                             // File is required for K/N because file declarations are not split by classes.
-                            currentClass ?: enclosingClass?.scopeWithCounter ?: enclosingFile.scopeWithCounter
+                            ?: enclosingFile.scopeWithCounter
                         val index =
-                            if (enclosingScope is ScopeWithCounter &&
-                                (declaration.name.isSpecial || declaration.name in enclosingScope.usedLocalFunctionNames)
-                            ) enclosingScope.counter++ else -1
+                            if (declaration.name.isSpecial || declaration.name in enclosingScope.usedLocalFunctionNames)
+                                enclosingScope.counter++
+                            else -1
                         localFunctions[declaration] =
                             LocalFunctionContext(declaration, index, enclosingScope.irElement as IrDeclarationContainer)
-                        (enclosingScope as? ScopeWithCounter)?.usedLocalFunctionNames?.add(declaration.name)
+                        enclosingScope.usedLocalFunctionNames.add(declaration.name)
                     }
                 }
 
@@ -911,7 +914,7 @@ class LocalDeclarationsLowering(
                 }
 
                 private val inInlineFunctionScope: Boolean
-                    get() = allScopes.any { scope -> (scope.irElement as? IrFunction)?.isInline ?: false } ||
+                    get() = allContexts.any { scope -> (scope.irElement as? IrFunction)?.isInline ?: false } ||
                             generateSequence(container) { it.parent as? IrDeclaration }.any { it is IrFunction && it.isInline }
             })
         }

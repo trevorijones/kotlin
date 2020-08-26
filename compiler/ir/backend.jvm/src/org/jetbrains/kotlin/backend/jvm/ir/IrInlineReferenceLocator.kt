@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.backend.jvm.codegen.isInlineIrExpression
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
 import org.jetbrains.kotlin.ir.declarations.IrFunction
+import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrBlock
 import org.jetbrains.kotlin.ir.expressions.IrCallableReference
@@ -19,7 +20,9 @@ import org.jetbrains.kotlin.ir.expressions.IrFunctionAccessExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionReference
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 
-internal open class IrInlineReferenceLocator(private val context: JvmBackendContext) : IrElementVisitorVoidWithContext() {
+internal open class IrInlineReferenceLocator(private val context: JvmBackendContext) : IrElementVisitorVoidWithContext<IrSymbolOwner>() {
+    override fun createElementContext(declaration: IrSymbolOwner): IrSymbolOwner = declaration
+
     override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
 
     override fun visitFunctionAccess(expression: IrFunctionAccessExpression) {
@@ -35,7 +38,7 @@ internal open class IrInlineReferenceLocator(private val context: JvmBackendCont
 
                 if (valueArgument is IrBlock && valueArgument.origin.isLambda) {
                     val reference = valueArgument.statements.last() as IrFunctionReference
-                    visitInlineLambda(reference, function, parameter, currentScope!!.irElement as IrDeclaration)
+                    visitInlineLambda(reference, function, parameter, allContexts.last() as IrDeclaration)
                 } else if (valueArgument is IrCallableReference<*>) {
                     visitInlineReference(valueArgument)
                 }
