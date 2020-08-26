@@ -21,9 +21,11 @@ import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.ObsoleteDescriptorBasedAPI
 import org.jetbrains.kotlin.ir.builders.Scope
 import org.jetbrains.kotlin.ir.declarations.*
-import org.jetbrains.kotlin.ir.symbols.*
+import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
+import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.IrPropertySymbol
+import org.jetbrains.kotlin.ir.symbols.IrScriptSymbol
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
-import org.jetbrains.kotlin.ir.visitors.IrElementVisitorVoid
 
 open class ScopeWithIr(val scope: Scope, val irElement: IrElement)
 
@@ -137,83 +139,5 @@ abstract class IrElementTransformerVoidWithContext : IrElementTransformerVoid() 
 
     open fun visitScriptNew(declaration: IrScript): IrStatement {
         return super.visitScript(declaration)
-    }
-}
-
-abstract class IrElementVisitorVoidWithContext<ElementContext> : IrElementVisitorVoid {
-    private val elementContextStack = mutableListOf<ElementContext>()
-
-    protected val allContexts: List<ElementContext> get() = elementContextStack
-
-    protected abstract fun createElementContext(declaration: IrSymbolOwner): ElementContext
-
-    final override fun visitFile(declaration: IrFile) {
-        elementContextStack.push(createElementContext(declaration))
-        visitFileNew(declaration)
-        elementContextStack.pop()
-    }
-
-    final override fun visitClass(declaration: IrClass) {
-        elementContextStack.push(createElementContext(declaration))
-        visitClassNew(declaration)
-        elementContextStack.pop()
-    }
-
-    final override fun visitProperty(declaration: IrProperty) {
-        elementContextStack.push(createElementContext(declaration))
-        visitPropertyNew(declaration)
-        elementContextStack.pop()
-    }
-
-    final override fun visitField(declaration: IrField) {
-        elementContextStack.push(createElementContext(declaration))
-        visitFieldNew(declaration)
-        elementContextStack.pop()
-    }
-
-    final override fun visitFunction(declaration: IrFunction) {
-        elementContextStack.push(createElementContext(declaration))
-        visitFunctionNew(declaration)
-        elementContextStack.pop()
-    }
-
-    final override fun visitAnonymousInitializer(declaration: IrAnonymousInitializer) {
-        elementContextStack.push(createElementContext(declaration))
-        visitAnonymousInitializerNew(declaration)
-        elementContextStack.pop()
-    }
-
-    final override fun visitValueParameter(declaration: IrValueParameter) {
-        elementContextStack.push(createElementContext(declaration))
-        visitValueParameterNew(declaration)
-        elementContextStack.pop()
-    }
-
-    open fun visitFileNew(declaration: IrFile) {
-        super.visitFile(declaration)
-    }
-
-    open fun visitClassNew(declaration: IrClass) {
-        super.visitClass(declaration)
-    }
-
-    open fun visitFunctionNew(declaration: IrFunction) {
-        super.visitFunction(declaration)
-    }
-
-    open fun visitPropertyNew(declaration: IrProperty) {
-        super.visitProperty(declaration)
-    }
-
-    open fun visitFieldNew(declaration: IrField) {
-        super.visitField(declaration)
-    }
-
-    open fun visitAnonymousInitializerNew(declaration: IrAnonymousInitializer) {
-        super.visitAnonymousInitializer(declaration)
-    }
-
-    open fun visitValueParameterNew(declaration: IrValueParameter) {
-        super.visitValueParameter(declaration)
     }
 }

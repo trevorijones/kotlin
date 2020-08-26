@@ -7,7 +7,6 @@ package org.jetbrains.kotlin.backend.common.lower
 
 import org.jetbrains.kotlin.backend.common.BodyLoweringPass
 import org.jetbrains.kotlin.backend.common.CommonBackendContext
-import org.jetbrains.kotlin.backend.common.IrElementVisitorVoidWithContext
 import org.jetbrains.kotlin.backend.common.descriptors.synthesizedString
 import org.jetbrains.kotlin.backend.common.ir.*
 import org.jetbrains.kotlin.backend.common.runOnFilePostfix
@@ -35,8 +34,7 @@ import org.jetbrains.kotlin.ir.util.file
 import org.jetbrains.kotlin.ir.util.parentAsClass
 import org.jetbrains.kotlin.ir.util.render
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
-import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
-import org.jetbrains.kotlin.ir.visitors.acceptVoid
+import org.jetbrains.kotlin.ir.visitors.IrElementVisitor
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
@@ -859,29 +857,34 @@ class LocalDeclarationsLowering(
                 currentParent as? IrClass
             }
 
-            irElement.acceptVoid(object : IrElementVisitorVoidWithContext<ScopeWithCounter>() {
-                override fun visitElement(element: IrElement) {
-                    element.acceptChildrenVoid(this)
+            class Data(val currentClass: ScopeWithCounter?, val isInInlineFunction: Boolean) {
+                fun withCurrentClass(currentClass: IrClass): Data =
+                    // Don't cache local declarations
+                    Data(ScopeWithCounter(currentClass), isInInlineFunction)
+
+                fun withInline(isInline: Boolean): Data =
+                    if (isInline && !isInInlineFunction) Data(currentClass, true) else this
+            }
+
+            irElement.accept(object : IrElementVisitor<Unit, Data> {
+                override fun visitElement(element: IrElement, data: Data) {
+                    element.acceptChildren(this, data)
                 }
 
-                override fun createElementContext(declaration: IrSymbolOwner): ScopeWithCounter {
-                    return ScopeWithCounter(declaration) // Don't cache local declarations
-                }
-
-                override fun visitFunctionExpression(expression: IrFunctionExpression) {
+                override fun visitFunctionExpression(expression: IrFunctionExpression, data: Data) {
                     // TODO: For now IrFunctionExpression can only be encountered here if this was called from the inliner,
                     // then all IrFunctionExpression will be replaced by IrFunctionReferenceExpression.
                     // Don't forget to fix this when that replacement has been dropped.
                     // Also, a note: even if a lambda is not an inline one, there still cannot be a reference to it
                     // from an outside declaration, so it is safe to skip them here and correctly handle later, after the above conversion.
-                    expression.function.acceptChildrenVoid(this)
+                    expression.function.acceptChildren(this, data)
                 }
 
-                override fun visitSimpleFunction(declaration: IrSimpleFunction) {
-                    super.visitSimpleFunction(declaration)
+                override fun visitSimpleFunction(declaration: IrSimpleFunction, data: Data) {
+                    super.visitSimpleFunction(declaration, data.withInline(declaration.isInline))
 
                     if (declaration.visibility == Visibilities.LOCAL) {
-                        val enclosingScope = allContexts.lastOrNull { it.irElement is IrClass }
+                        val enclosingScope = data.currentClass
                             ?: enclosingClass?.scopeWithCounter
                             // File is required for K/N because file declarations are not split by classes.
                             ?: enclosingFile.scopeWithCounter
@@ -895,31 +898,29 @@ class LocalDeclarationsLowering(
                     }
                 }
 
-                override fun visitConstructor(declaration: IrConstructor) {
-                    super.visitConstructor(declaration)
+                override fun visitConstructor(declaration: IrConstructor, data: Data) {
+                    super.visitConstructor(declaration, data)
 
                     if (!declaration.constructedClass.isLocalNotInner()) return
 
-                    localClassConstructors[declaration] = LocalClassConstructorContext(declaration, inInlineFunctionScope)
+                    localClassConstructors[declaration] = LocalClassConstructorContext(declaration, data.inInlineFunctionScope)
                 }
 
-                override fun visitClassNew(declaration: IrClass) {
+                override fun visitClass(declaration: IrClass, data: Data) {
                     if (classesToLower?.contains(declaration) == false) return
-                    super.visitClassNew(declaration)
+                    super.visitClass(declaration, data.withCurrentClass(declaration))
 
                     if (!declaration.isLocalNotInner()) return
 
-                    val localClassContext = LocalClassContext(declaration, inInlineFunctionScope)
-                    localClasses[declaration] = localClassContext
+                    localClasses[declaration] = LocalClassContext(declaration, data.inInlineFunctionScope)
                 }
 
-                private val inInlineFunctionScope: Boolean
-                    get() = allContexts.any { scope -> (scope.irElement as? IrFunction)?.isInline ?: false } ||
+                private val Data.inInlineFunctionScope: Boolean
+                    get() = isInInlineFunction ||
                             generateSequence(container) { it.parent as? IrDeclaration }.any { it is IrFunction && it.isInline }
-            })
+            }, Data(null, false))
         }
     }
-
 }
 
 // Local inner classes capture anything through outer
