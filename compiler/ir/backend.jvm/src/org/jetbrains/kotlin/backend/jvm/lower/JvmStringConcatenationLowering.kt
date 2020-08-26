@@ -6,7 +6,7 @@
 package org.jetbrains.kotlin.backend.jvm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
 import org.jetbrains.kotlin.backend.common.lower.FlattenStringConcatenationLowering
 import org.jetbrains.kotlin.backend.common.lower.flattenStringConcatenationPhase
 import org.jetbrains.kotlin.backend.common.lower.loops.forLoopsPhase
@@ -19,16 +19,11 @@ import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
-import org.jetbrains.kotlin.ir.expressions.IrConst
-import org.jetbrains.kotlin.ir.expressions.IrConstKind
-import org.jetbrains.kotlin.ir.expressions.IrExpression
-import org.jetbrains.kotlin.ir.expressions.IrStringConcatenation
-import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
-import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
+import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
+import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.constructors
 import org.jetbrains.kotlin.ir.util.functions
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 internal val jvmStringConcatenationLowering = makeIrFilePhase(
     ::JvmStringConcatenationLowering,
@@ -46,8 +41,10 @@ internal val jvmStringConcatenationLowering = makeIrFilePhase(
  * is that this pass also handles JVM specific optimizations, such as calling stringPlus
  * for two arguments, and properly handles inline classes.
  */
-private class JvmStringConcatenationLowering(val context: JvmBackendContext) : FileLoweringPass, IrElementTransformerVoidWithContext() {
-    override fun lower(irFile: IrFile) = irFile.transformChildrenVoid()
+private class JvmStringConcatenationLowering(val context: JvmBackendContext) : FileLoweringPass, IrElementTransformerWithScopeOwner() {
+    override fun lower(irFile: IrFile) {
+        irFile.transformChildren(this, null)
+    }
 
     private val stringBuilder = context.ir.symbols.stringBuilder.owner
 
@@ -117,9 +114,10 @@ private class JvmStringConcatenationLowering(val context: JvmBackendContext) : F
         }
     }
 
-    override fun visitStringConcatenation(expression: IrStringConcatenation): IrExpression {
-        expression.transformChildrenVoid(this)
-        return context.createJvmIrBuilder(currentScope!!.scope.scopeOwnerSymbol, expression.startOffset, expression.endOffset).run {
+    override fun visitStringConcatenation(expression: IrStringConcatenation, data: IrSymbolOwner?): IrExpression {
+        expression.transformChildren(this, data)
+
+        return context.createJvmIrBuilder(data!!.symbol, expression.startOffset, expression.endOffset).run {
             // When `String.plus(Any?)` is invoked with receiver of platform type String or String with enhanced nullability, this could
             // fail a nullability check (NullPointerException) on the receiver. However, the non-IR backend currently does NOT insert this
             // check (see KT-36625, pending language design decision). To maintain compatibility with the non-IR backend, we remove

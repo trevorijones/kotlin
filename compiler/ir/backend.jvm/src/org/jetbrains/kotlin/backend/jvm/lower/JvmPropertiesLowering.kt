@@ -6,7 +6,7 @@
 package org.jetbrains.kotlin.backend.jvm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
 import org.jetbrains.kotlin.backend.common.ir.copyTo
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.jvm.JvmBackendContext
@@ -15,6 +15,7 @@ import org.jetbrains.kotlin.backend.jvm.ir.needsAccessor
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.*
@@ -31,30 +32,28 @@ import org.jetbrains.kotlin.ir.util.coerceToUnit
 import org.jetbrains.kotlin.ir.util.render
 import org.jetbrains.kotlin.ir.util.resolveFakeOverride
 import org.jetbrains.kotlin.ir.util.transformDeclarationsFlat
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.utils.addIfNotNull
-import java.util.*
 
-class JvmPropertiesLowering(private val backendContext: JvmBackendContext) : IrElementTransformerVoidWithContext(), FileLoweringPass {
+class JvmPropertiesLowering(private val backendContext: JvmBackendContext) : IrElementTransformerWithScopeOwner(), FileLoweringPass {
     override fun lower(irFile: IrFile) {
         irFile.accept(this, null)
     }
 
-    override fun visitClassNew(declaration: IrClass): IrStatement {
-        declaration.transformChildrenVoid(this)
+    override fun visitClass(declaration: IrClass, data: IrSymbolOwner?): IrStatement {
+        super.visitClass(declaration, data)
         declaration.transformDeclarationsFlat { if (it is IrProperty) lowerProperty(it, declaration.kind) else null }
         return declaration
     }
 
-    override fun visitCall(expression: IrCall): IrExpression {
-        val simpleFunction = (expression.symbol.owner as? IrSimpleFunction) ?: return super.visitCall(expression)
-        val property = simpleFunction.correspondingPropertySymbol?.owner ?: return super.visitCall(expression)
-        expression.transformChildrenVoid()
+    override fun visitCall(expression: IrCall, data: IrSymbolOwner?): IrElement {
+        val simpleFunction = (expression.symbol.owner as? IrSimpleFunction) ?: return super.visitCall(expression, data)
+        val property = simpleFunction.correspondingPropertySymbol?.owner ?: return super.visitCall(expression, data)
+        expression.transformChildren(this, data)
 
         if (shouldSubstituteAccessorWithField(property, simpleFunction)) {
-            backendContext.createIrBuilder(currentScope!!.scope.scopeOwnerSymbol, expression.startOffset, expression.endOffset).apply {
+            backendContext.createIrBuilder(data!!.symbol, expression.startOffset, expression.endOffset).apply {
                 return when (simpleFunction) {
                     property.getter -> substituteGetter(property, expression)
                     property.setter -> substituteSetter(property, expression)

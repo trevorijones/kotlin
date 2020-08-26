@@ -22,14 +22,15 @@ import org.jetbrains.kotlin.ir.expressions.copyTypeArgumentsFrom
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.types.getClass
-import org.jetbrains.kotlin.ir.util.*
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
+import org.jetbrains.kotlin.ir.util.constructedClass
+import org.jetbrains.kotlin.ir.util.constructors
+import org.jetbrains.kotlin.ir.util.functions
+import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.util.OperatorNameConventions
 
-class ArrayConstructorLowering(val context: CommonBackendContext) : IrElementTransformerVoidWithContext(), BodyLoweringPass {
-
+class ArrayConstructorLowering(val context: CommonBackendContext) : BodyLoweringPass {
     override fun lower(irBody: IrBody, container: IrDeclaration) {
-        irBody.transformChildrenVoid(ArrayConstructorTransformer(context, container as IrSymbolOwner))
+        irBody.transformChildren(ArrayConstructorTransformer(context, container as IrSymbolOwner), null)
     }
 }
 

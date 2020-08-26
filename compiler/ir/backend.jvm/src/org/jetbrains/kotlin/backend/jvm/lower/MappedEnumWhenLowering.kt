@@ -19,6 +19,7 @@ import org.jetbrains.kotlin.ir.builders.declarations.buildClass
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrEnumEntry
 import org.jetbrains.kotlin.ir.declarations.IrField
+import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.impl.IrGetEnumValueImpl
 import org.jetbrains.kotlin.ir.types.defaultType
@@ -105,10 +106,10 @@ private class MappedEnumWhenLowering(context: CommonBackendContext) : EnumWhenLo
             putValueArgument(0, super.mapRuntimeEnumEntry(builder, subject))
         }
 
-    override fun visitClassNew(declaration: IrClass): IrStatement {
+    override fun visitClass(declaration: IrClass, data: IrSymbolOwner?): IrStatement {
         val oldState = state
         state = EnumMappingState()
-        super.visitClassNew(declaration)
+        super.visitClass(declaration, data)
 
         for ((enum, mappingAndField) in state!!.mappings) {
             val (mapping, field) = mappingAndField

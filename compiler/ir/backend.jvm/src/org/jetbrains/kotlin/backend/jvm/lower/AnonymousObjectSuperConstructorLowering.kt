@@ -6,7 +6,7 @@
 package org.jetbrains.kotlin.backend.jvm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.common.lower.irBlock
 import org.jetbrains.kotlin.backend.common.phaser.makeIrFilePhase
@@ -16,6 +16,7 @@ import org.jetbrains.kotlin.ir.builders.declarations.addValueParameter
 import org.jetbrains.kotlin.ir.builders.irGet
 import org.jetbrains.kotlin.ir.builders.irTemporary
 import org.jetbrains.kotlin.ir.declarations.IrFile
+import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.*
@@ -54,15 +55,15 @@ internal val anonymousObjectSuperConstructorPhase = makeIrFilePhase(
 // attempts to read them from fields, causing a bytecode validation error.
 //
 // (TODO fix the inliner instead. Then keep this code for one more version for backwards compatibility.)
-private class AnonymousObjectSuperConstructorLowering(val context: JvmBackendContext) : IrElementTransformerVoidWithContext(),
+private class AnonymousObjectSuperConstructorLowering(val context: JvmBackendContext) : IrElementTransformerWithScopeOwner(),
     FileLoweringPass {
     override fun lower(irFile: IrFile) {
-        irFile.transformChildrenVoid()
+        irFile.transformChildren(this, null)
     }
 
-    override fun visitBlock(expression: IrBlock): IrExpression {
+    override fun visitBlock(expression: IrBlock, data: IrSymbolOwner?): IrExpression {
         if (expression.origin != IrStatementOrigin.OBJECT_LITERAL)
-            return super.visitBlock(expression)
+            return super.visitBlock(expression, data)
 
         val objectConstructorCall = expression.statements.last() as? IrConstructorCall
             ?: throw AssertionError("object literal does not end in a constructor call")
@@ -109,7 +110,7 @@ private class AnonymousObjectSuperConstructorLowering(val context: JvmBackendCon
         }
 
         val classTypeParametersCount = objectConstructorCall.typeArgumentsCount - objectConstructorCall.symbol.owner.typeParameters.size
-        context.createIrBuilder(currentScope!!.scope.scopeOwnerSymbol).run {
+        context.createIrBuilder(data!!.symbol).run {
             expression.statements[expression.statements.size - 1] = irBlock(objectConstructorCall) {
                 +IrConstructorCallImpl.fromSymbolOwner(
                     objectConstructorCall.startOffset, objectConstructorCall.endOffset, objectConstructorCall.type,
@@ -125,6 +126,7 @@ private class AnonymousObjectSuperConstructorLowering(val context: JvmBackendCon
                 }
             }
         }
-        return super.visitBlock(expression)
+
+        return super.visitBlock(expression, data)
     }
 }

@@ -6,23 +6,22 @@
 package org.jetbrains.kotlin.backend.jvm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
 import org.jetbrains.kotlin.backend.common.phaser.makeIrFilePhase
 import org.jetbrains.kotlin.backend.jvm.JvmBackendContext
 import org.jetbrains.kotlin.backend.jvm.ir.IrArrayBuilder
 import org.jetbrains.kotlin.backend.jvm.ir.createJvmIrBuilder
 import org.jetbrains.kotlin.backend.jvm.ir.irArray
 import org.jetbrains.kotlin.backend.jvm.ir.irArrayOf
-import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.builtins.PrimitiveType
+import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.builtins.UnsignedType
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
-import org.jetbrains.kotlin.ir.declarations.IrClass
-import org.jetbrains.kotlin.ir.declarations.IrFile
-import org.jetbrains.kotlin.ir.declarations.IrFunction
-import org.jetbrains.kotlin.ir.declarations.IrPackageFragment
+import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.types.makeNotNull
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.util.capitalizeDecapitalize.toLowerCaseAsciiOnly
@@ -34,19 +33,21 @@ val varargPhase = makeIrFilePhase(
     prerequisite = setOf(polymorphicSignaturePhase)
 )
 
-private class VarargLowering(val context: JvmBackendContext) : FileLoweringPass, IrElementTransformerVoidWithContext() {
-    override fun lower(irFile: IrFile) = irFile.transformChildrenVoid()
+private class VarargLowering(val context: JvmBackendContext) : FileLoweringPass, IrElementTransformerWithScopeOwner() {
+    override fun lower(irFile: IrFile) {
+        irFile.transformChildren(this, null)
+    }
 
     // Ignore annotations
-    override fun visitConstructorCall(expression: IrConstructorCall): IrExpression {
+    override fun visitConstructorCall(expression: IrConstructorCall, data: IrSymbolOwner?): IrElement {
         val constructor = expression.symbol.owner
         if (constructor.constructedClass.isAnnotationClass)
             return expression
-        return super.visitConstructorCall(expression)
+        return super.visitConstructorCall(expression, data)
     }
 
-    override fun visitFunctionAccess(expression: IrFunctionAccessExpression): IrExpression {
-        expression.transformChildrenVoid()
+    override fun visitFunctionAccess(expression: IrFunctionAccessExpression, data: IrSymbolOwner?): IrExpression {
+        expression.transformChildren(this, data)
         val function = expression.symbol
 
         // Replace empty varargs with empty arrays
@@ -58,7 +59,7 @@ private class VarargLowering(val context: JvmBackendContext) : FileLoweringPass,
             if (parameter.varargElementType != null && !parameter.hasDefaultValue()) {
                 // Compute the correct type for the array argument.
                 val arrayType = parameter.type.substitute(expression.typeSubstitutionMap).makeNotNull()
-                expression.putValueArgument(i, createBuilder().irArrayOf(arrayType))
+                expression.putValueArgument(i, createBuilder(data!!.symbol).irArrayOf(arrayType))
             }
         }
 
@@ -68,38 +69,40 @@ private class VarargLowering(val context: JvmBackendContext) : FileLoweringPass,
             function.isArrayOf ->
                 expression.getValueArgument(0)!!
             function.isEmptyArray ->
-                createBuilder(expression.startOffset, expression.endOffset).irArrayOf(expression.type)
+                createBuilder(data!!.symbol, expression.startOffset, expression.endOffset).irArrayOf(expression.type)
             else ->
                 expression
         }
     }
 
-    override fun visitVararg(expression: IrVararg): IrExpression =
-        createBuilder(expression.startOffset, expression.endOffset).irArray(expression.type) { addVararg(expression) }
+    override fun visitVararg(expression: IrVararg, data: IrSymbolOwner?): IrExpression =
+        createBuilder(data!!.symbol, expression.startOffset, expression.endOffset).irArray(expression.type) {
+            addVararg(expression, data)
+        }
 
-    private fun IrArrayBuilder.addVararg(expression: IrVararg) {
+    private fun IrArrayBuilder.addVararg(expression: IrVararg, data: IrSymbolOwner) {
         loop@ for (element in expression.elements) {
             when (element) {
-                is IrExpression -> +element.transform(this@VarargLowering, null)
+                is IrExpression -> +element.transform(this@VarargLowering, data)
                 is IrSpreadElement -> {
                     val spread = element.expression
                     if (spread is IrFunctionAccessExpression && spread.symbol.isArrayOf) {
                         // Skip empty arrays and don't copy immediately created arrays
                         val argument = spread.getValueArgument(0) ?: continue@loop
                         if (argument is IrVararg) {
-                            addVararg(argument)
+                            addVararg(argument, data)
                             continue@loop
                         }
                     }
-                    addSpread(spread.transform(this@VarargLowering, null))
+                    addSpread(spread.transform(this@VarargLowering, data))
                 }
                 else -> error("Unexpected IrVarargElement subclass: $element")
             }
         }
     }
 
-    private fun createBuilder(startOffset: Int = UNDEFINED_OFFSET, endOffset: Int = UNDEFINED_OFFSET) =
-        context.createJvmIrBuilder(currentScope!!.scope.scopeOwnerSymbol, startOffset, endOffset)
+    private fun createBuilder(currentScopeOwner: IrSymbol, startOffset: Int = UNDEFINED_OFFSET, endOffset: Int = UNDEFINED_OFFSET) =
+        context.createJvmIrBuilder(currentScopeOwner, startOffset, endOffset)
 
     private val IrFunctionSymbol.isArrayOf: Boolean
         get() = owner.isArrayOf

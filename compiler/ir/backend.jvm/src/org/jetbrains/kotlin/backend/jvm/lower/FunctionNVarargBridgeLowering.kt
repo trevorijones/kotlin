@@ -6,7 +6,7 @@
 package org.jetbrains.kotlin.backend.jvm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
 import org.jetbrains.kotlin.backend.common.ir.copyTo
 import org.jetbrains.kotlin.backend.common.lower.at
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
@@ -19,15 +19,14 @@ import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.builtins.functions.FunctionInvokeDescriptor
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.builders.declarations.addFunction
 import org.jetbrains.kotlin.ir.declarations.*
-import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionAccessExpression
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.util.*
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
 
@@ -41,19 +40,20 @@ internal val functionNVarargBridgePhase = makeIrFilePhase(
 // inherit from the generic FunctionN class which has a vararg invoke method. This phase
 // adds a bridge method for such large arity functions, which checks the number of arguments
 // dynamically.
-private class FunctionNVarargBridgeLowering(val context: JvmBackendContext) :
-    FileLoweringPass, IrElementTransformerVoidWithContext() {
-    override fun lower(irFile: IrFile) = irFile.transformChildrenVoid(this)
+private class FunctionNVarargBridgeLowering(val context: JvmBackendContext) : IrElementTransformerWithScopeOwner(), FileLoweringPass {
+    override fun lower(irFile: IrFile) {
+        irFile.transformChildren(this, null)
+    }
 
     // Change calls to big arity invoke functions to vararg calls.
-    override fun visitFunctionAccess(expression: IrFunctionAccessExpression): IrExpression {
+    override fun visitFunctionAccess(expression: IrFunctionAccessExpression, data: IrSymbolOwner?): IrElement {
         if (expression.valueArgumentsCount < FunctionInvokeDescriptor.BIG_ARITY ||
             !(expression.symbol.owner.parentAsClass.defaultType.isFunctionOrKFunction() ||
                     expression.symbol.owner.parentAsClass.defaultType.isSuspendFunctionOrKFunction()) ||
             expression.symbol.owner.name.asString() != "invoke"
-        ) return super.visitFunctionAccess(expression)
+        ) return super.visitFunctionAccess(expression, data)
 
-        return context.createJvmIrBuilder(currentScope!!.scope.scopeOwnerSymbol).run {
+        return context.createJvmIrBuilder(data!!.symbol).run {
             at(expression)
             irCall(functionNInvokeFun).apply {
                 dispatchReceiver = irImplicitCast(
@@ -67,14 +67,14 @@ private class FunctionNVarargBridgeLowering(val context: JvmBackendContext) :
         }
     }
 
-    override fun visitClassNew(declaration: IrClass): IrStatement {
+    override fun visitClass(declaration: IrClass, data: IrSymbolOwner?): IrStatement {
         val bigArityFunctionSuperTypes = declaration.superTypes.filterIsInstance<IrSimpleType>().filter {
             it.isFunctionType && it.arguments.size > FunctionInvokeDescriptor.BIG_ARITY
         }
 
         if (bigArityFunctionSuperTypes.isEmpty())
-            return super.visitClassNew(declaration)
-        declaration.transformChildrenVoid(this)
+            return super.visitClass(declaration, data)
+        declaration.transformChildren(this, data)
 
         // Note that we allow classes with multiple function supertypes, so long as only one
         // of them has more than 22 arguments.

@@ -7,7 +7,7 @@ package org.jetbrains.kotlin.backend.jvm.lower
 
 import gnu.trove.TObjectIntHashMap
 import org.jetbrains.kotlin.backend.common.ClassLoweringPass
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
 import org.jetbrains.kotlin.backend.common.ir.copyTo
 import org.jetbrains.kotlin.backend.common.lower.at
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
@@ -28,6 +28,7 @@ import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrExpressionBodyImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrGetValueImpl
 import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
+import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueParameterSymbol
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.defaultType
@@ -75,7 +76,7 @@ private class EnumClassLowering(val context: JvmBackendContext) : ClassLoweringP
             irClass.transformChildrenVoid(EnumClassDeclarationsTransformer(valuesField))
 
             // Add synthetic arguments to enum constructor calls and remap enum constructor paramters
-            irClass.transformChildrenVoid(EnumClassCallTransformer())
+            irClass.transformChildren(EnumClassCallTransformer(), null)
         }
 
         private fun buildEnumEntryField(enumEntry: IrEnumEntry): IrField =
@@ -153,18 +154,18 @@ private class EnumClassLowering(val context: JvmBackendContext) : ClassLoweringP
             }
         }
 
-        private inner class EnumClassCallTransformer : IrElementTransformerVoidWithContext() {
-            override fun visitClassNew(declaration: IrClass): IrStatement =
-                if (declaration.isEnumEntry) super.visitClassNew(declaration) else declaration
+        private inner class EnumClassCallTransformer : IrElementTransformerWithScopeOwner() {
+            override fun visitClass(declaration: IrClass, data: IrSymbolOwner?): IrStatement =
+                if (declaration.isEnumEntry) super.visitClass(declaration, data) else declaration
 
-            override fun visitGetValue(expression: IrGetValue): IrExpression =
+            override fun visitGetValue(expression: IrGetValue, data: IrSymbolOwner?): IrExpression =
                 loweredEnumConstructorParameters[expression.symbol]?.let {
                     IrGetValueImpl(expression.startOffset, expression.endOffset, it.type, it.symbol, expression.origin)
                 } ?: expression
 
-            override fun visitEnumConstructorCall(expression: IrEnumConstructorCall): IrExpression {
-                expression.transformChildrenVoid(this)
-                val scopeOwnerSymbol = currentScope!!.scope.scopeOwnerSymbol
+            override fun visitEnumConstructorCall(expression: IrEnumConstructorCall, data: IrSymbolOwner?): IrExpression {
+                expression.transformChildren(this, data)
+                val scopeOwnerSymbol = data!!.symbol
                 return context.createIrBuilder(scopeOwnerSymbol).at(expression).run {
                     val constructor = loweredEnumConstructors[expression.symbol] ?: expression.symbol.owner
 
@@ -172,25 +173,29 @@ private class EnumClassLowering(val context: JvmBackendContext) : ClassLoweringP
                         irDelegatingConstructorCall(constructor)
                     } else {
                         irCall(constructor)
-                    }.also {
-                        passConstructorArguments(it, expression, declarationToEnumEntry[scopeOwnerSymbol.owner as IrDeclaration])
+                    }.also { call ->
+                        passConstructorArguments(
+                            call, expression, scopeOwnerSymbol, declarationToEnumEntry[scopeOwnerSymbol.owner as IrDeclaration]
+                        )
                     }
                 }
             }
 
-            override fun visitDelegatingConstructorCall(expression: IrDelegatingConstructorCall): IrExpression {
-                expression.transformChildrenVoid(this)
+            override fun visitDelegatingConstructorCall(expression: IrDelegatingConstructorCall, data: IrSymbolOwner?): IrExpression {
+                expression.transformChildren(this, data)
                 val replacement = loweredEnumConstructors[expression.symbol]
                     ?: return expression
 
-                return context.createIrBuilder(currentScope!!.scope.scopeOwnerSymbol).at(expression).run {
-                    irDelegatingConstructorCall(replacement).also { passConstructorArguments(it, expression) }
+                val scopeOwnerSymbol = data!!.symbol
+                return context.createIrBuilder(scopeOwnerSymbol).at(expression).run {
+                    irDelegatingConstructorCall(replacement).also { passConstructorArguments(it, expression, scopeOwnerSymbol) }
                 }
             }
 
             private fun IrBuilderWithScope.passConstructorArguments(
                 call: IrFunctionAccessExpression,
                 original: IrFunctionAccessExpression,
+                scopeOwnerSymbol: IrSymbol,
                 enumEntry: IrEnumEntry? = null
             ) {
                 call.copyTypeArgumentsFrom(original)
@@ -198,7 +203,7 @@ private class EnumClassLowering(val context: JvmBackendContext) : ClassLoweringP
                     call.putValueArgument(0, irString(enumEntry.name.asString()))
                     call.putValueArgument(1, irInt(enumEntryOrdinals[enumEntry]))
                 } else {
-                    val constructor = currentScope!!.scope.scopeOwnerSymbol as IrConstructorSymbol
+                    val constructor = scopeOwnerSymbol as IrConstructorSymbol
                     call.putValueArgument(0, irGet(constructor.owner.valueParameters[0]))
                     call.putValueArgument(1, irGet(constructor.owner.valueParameters[1]))
                 }

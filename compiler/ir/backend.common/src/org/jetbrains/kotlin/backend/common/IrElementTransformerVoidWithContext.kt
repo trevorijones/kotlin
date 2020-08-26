@@ -25,6 +25,7 @@ import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrPropertySymbol
 import org.jetbrains.kotlin.ir.symbols.IrScriptSymbol
+import org.jetbrains.kotlin.ir.visitors.IrElementTransformer
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 
 open class ScopeWithIr(val scope: Scope, val irElement: IrElement)
@@ -140,4 +141,30 @@ abstract class IrElementTransformerVoidWithContext : IrElementTransformerVoid() 
     open fun visitScriptNew(declaration: IrScript): IrStatement {
         return super.visitScript(declaration)
     }
+}
+
+abstract class IrElementTransformerWithScopeOwner : IrElementTransformer<IrSymbolOwner?> {
+    override fun visitFile(declaration: IrFile, data: IrSymbolOwner?): IrFile =
+        super.visitFile(declaration, declaration)
+
+    override fun visitClass(declaration: IrClass, data: IrSymbolOwner?): IrStatement =
+        super.visitClass(declaration, declaration)
+
+    override fun visitProperty(declaration: IrProperty, data: IrSymbolOwner?): IrStatement =
+        super.visitProperty(declaration, declaration)
+
+    override fun visitField(declaration: IrField, data: IrSymbolOwner?): IrStatement =
+        super.visitField(declaration, declaration)
+
+    override fun visitFunction(declaration: IrFunction, data: IrSymbolOwner?): IrStatement =
+        super.visitFunction(declaration, declaration)
+
+    override fun visitAnonymousInitializer(declaration: IrAnonymousInitializer, data: IrSymbolOwner?): IrStatement =
+        super.visitAnonymousInitializer(declaration, declaration)
+
+    override fun visitValueParameter(declaration: IrValueParameter, data: IrSymbolOwner?): IrStatement =
+        super.visitValueParameter(declaration, declaration)
+
+    override fun visitScript(declaration: IrScript, data: IrSymbolOwner?): IrStatement =
+        super.visitScript(declaration, declaration)
 }

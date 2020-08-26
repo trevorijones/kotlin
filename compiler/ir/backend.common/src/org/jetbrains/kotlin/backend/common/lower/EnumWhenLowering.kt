@@ -7,9 +7,11 @@ package org.jetbrains.kotlin.backend.common.lower
 
 import org.jetbrains.kotlin.backend.common.*
 import org.jetbrains.kotlin.descriptors.ClassKind
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.IrEnumEntry
 import org.jetbrains.kotlin.ir.declarations.IrFile
+import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrCallImpl
@@ -22,13 +24,12 @@ import org.jetbrains.kotlin.ir.util.dump
 import org.jetbrains.kotlin.ir.util.getPropertyGetter
 import org.jetbrains.kotlin.ir.util.isNullConst
 import org.jetbrains.kotlin.ir.util.parentAsClass
-import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /** Look for when-constructs where subject is enum entry.
  * Replace branches that are comparisons with compile-time known enum entries
  * with comparisons of ordinals.
  */
-open class EnumWhenLowering(protected val context: CommonBackendContext) : IrElementTransformerVoidWithContext(), FileLoweringPass {
+open class EnumWhenLowering(protected val context: CommonBackendContext) : IrElementTransformerWithScopeOwner(), FileLoweringPass {
     private val subjectWithOrdinalStack = mutableListOf<Pair<IrVariable, Lazy<IrVariable>>>()
 
     protected open fun mapConstEnumEntry(entry: IrEnumEntry): Int =
@@ -40,26 +41,26 @@ open class EnumWhenLowering(protected val context: CommonBackendContext) : IrEle
         builder.irCall(subject.type.getClass()!!.symbol.getPropertyGetter("ordinal")!!).apply { dispatchReceiver = subject }
 
     override fun lower(irFile: IrFile) {
-        visitFile(irFile)
+        irFile.transformChildren(this, null)
     }
 
-    override fun visitBlock(expression: IrBlock): IrExpression {
+    override fun visitBlock(expression: IrBlock, data: IrSymbolOwner?): IrExpression {
         // NB: See BranchingExpressionGenerator to get insight about `when` block translation to IR.
         if (expression.origin != IrStatementOrigin.WHEN) {
-            return super.visitBlock(expression)
+            return super.visitBlock(expression, data)
         }
         // when-block with subject should have two children: temporary variable and when itself.
         if (expression.statements.size != 2) {
-            return super.visitBlock(expression)
+            return super.visitBlock(expression, data)
         }
         val subject = expression.statements[0]
         if (subject !is IrVariable || subject.type.getClass()?.kind != ClassKind.ENUM_CLASS) {
-            return super.visitBlock(expression)
+            return super.visitBlock(expression, data)
         }
         // Will be initialized only when we found a branch that compares
         // subject with compile-time known enum entry.
         val subjectOrdinalProvider = lazy {
-            context.createIrBuilder(currentScope!!.scope.scopeOwnerSymbol, subject.startOffset, subject.endOffset).run {
+            context.createIrBuilder(data!!.symbol, subject.startOffset, subject.endOffset).run {
                 val integer = if (subject.type.isNullable())
                     irIfNull(context.irBuiltIns.intType, irGet(subject), irInt(-1), mapRuntimeEnumEntry(this, irGet(subject)))
                 else
@@ -72,34 +73,34 @@ open class EnumWhenLowering(protected val context: CommonBackendContext) : IrEle
         subjectWithOrdinalStack.push(Pair(subject, subjectOrdinalProvider))
         try {
             // Process nested `when` and comparisons.
-            expression.statements[1].transformChildrenVoid(this)
+            expression.statements[1].transformChildren(this, data)
         } finally {
             subjectWithOrdinalStack.pop()
         }
         return expression
     }
 
-    override fun visitCall(expression: IrCall): IrExpression {
+    override fun visitCall(expression: IrCall, data: IrSymbolOwner?): IrElement {
         // We are looking for branch that is a comparison of the subject and another enum entry.
         if (expression.symbol != context.irBuiltIns.eqeqSymbol) {
-            return super.visitCall(expression)
+            return super.visitCall(expression, data)
         }
         val lhs = expression.getValueArgument(0)!!
         val rhs = expression.getValueArgument(1)!!
 
         val (topmostSubject, topmostOrdinalProvider) = subjectWithOrdinalStack.peek()
-            ?: return super.visitCall(expression)
+            ?: return super.visitCall(expression, data)
         val other = when {
             lhs is IrGetValue && lhs.symbol.owner == topmostSubject -> rhs
             rhs is IrGetValue && rhs.symbol.owner == topmostSubject -> lhs
-            else -> return super.visitCall(expression)
+            else -> return super.visitCall(expression, data)
         }
         val entryOrdinal = when {
             other is IrGetEnumValue && topmostSubject.type.classifierOrNull?.owner == other.symbol.owner.parent ->
                 mapConstEnumEntry(other.symbol.owner)
             other.isNullConst() ->
                 -1
-            else -> return super.visitCall(expression)
+            else -> return super.visitCall(expression, data)
         }
         val subjectOrdinal = topmostOrdinalProvider.value
         return IrCallImpl(

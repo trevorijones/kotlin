@@ -7,7 +7,8 @@ package org.jetbrains.kotlin.backend.common.lower
 
 import org.jetbrains.kotlin.backend.common.BodyLoweringPass
 import org.jetbrains.kotlin.backend.common.CommonBackendContext
-import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
+import org.jetbrains.kotlin.backend.common.IrElementTransformerWithScopeOwner
+import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
 import org.jetbrains.kotlin.ir.declarations.IrSymbolOwner
@@ -17,7 +18,6 @@ import org.jetbrains.kotlin.ir.expressions.impl.IrCompositeImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrDoWhileLoopImpl
 import org.jetbrains.kotlin.ir.symbols.IrReturnableBlockSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
-import org.jetbrains.kotlin.ir.transformStatement
 
 /**
  * Replaces returnable blocks and `return`'s with loops and `break`'s correspondingly.
@@ -72,19 +72,19 @@ class ReturnableBlockLowering(val context: CommonBackendContext) : BodyLoweringP
     }
 }
 
-class ReturnableBlockTransformer(val context: CommonBackendContext, val containerSymbol: IrSymbol? = null) : IrElementTransformerVoidWithContext() {
+class ReturnableBlockTransformer(val context: CommonBackendContext, val containerSymbol: IrSymbol? = null) : IrElementTransformerWithScopeOwner() {
     private var labelCnt = 0
     private val returnMap = mutableMapOf<IrReturnableBlockSymbol, (IrReturn) -> IrExpression>()
 
-    override fun visitReturn(expression: IrReturn): IrExpression {
-        expression.transformChildrenVoid()
+    override fun visitReturn(expression: IrReturn, data: IrSymbolOwner?): IrExpression {
+        expression.transformChildren(this, null)
         return returnMap[expression.returnTargetSymbol]?.invoke(expression) ?: expression
     }
 
-    override fun visitContainerExpression(expression: IrContainerExpression): IrExpression {
-        if (expression !is IrReturnableBlock) return super.visitContainerExpression(expression)
+    override fun visitContainerExpression(expression: IrContainerExpression, data: IrSymbolOwner?): IrExpression {
+        if (expression !is IrReturnableBlock) return super.visitContainerExpression(expression, data)
 
-        val scopeSymbol = currentScope?.scope?.scopeOwnerSymbol ?: containerSymbol
+        val scopeSymbol = data?.symbol ?: containerSymbol
         val builder = context.createIrBuilder(scopeSymbol!!)
         val variable by lazy {
             builder.scope.createTmpVariable(expression.type, "tmp\$ret\$${labelCnt++}", true)
@@ -114,12 +114,12 @@ class ReturnableBlockTransformer(val context: CommonBackendContext, val containe
 
         val newStatements = expression.statements.mapIndexed { i, s ->
             if (i == expression.statements.lastIndex && s is IrReturn && s.returnTargetSymbol == expression.symbol) {
-                s.transformChildrenVoid()
+                s.transformChildren(this, data)
                 if (!hasReturned) s.value else {
                     builder.irSetVar(variable.symbol, s.value)
                 }
             } else {
-                s.transformStatement(this)
+                s.transform(this, data) as IrStatement
             }
         }
 
