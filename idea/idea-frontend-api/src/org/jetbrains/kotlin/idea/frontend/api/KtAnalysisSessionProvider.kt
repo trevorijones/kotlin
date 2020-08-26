@@ -5,9 +5,15 @@
 
 package org.jetbrains.kotlin.idea.frontend.api
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.Task
+import org.jetbrains.kotlin.idea.frontend.api.types.render
 import org.jetbrains.kotlin.idea.util.application.runReadAction
 import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.utils.PrintingLogger
 
 abstract class KtAnalysisSessionProvider {
     abstract fun getAnalysisSessionFor(contextElement: KtElement): KtAnalysisSession
@@ -30,4 +36,22 @@ inline fun <R> analyzeWithReadAction(
     crossinline action: KtAnalysisSession.() -> R
 ): R = runReadAction {
     analyze(contextElement, action)
+}
+
+/**
+ * Run a modal window with progress bar and specified [windowTitle]
+ * and execute given [action] task with [KtAnalysisSession] context
+ * If [action] throws exception, then [analyseInModalWindow] will rethrow it
+ */
+inline fun <R> analyseInModalWindow(
+    contextElement: KtElement,
+    windowTitle: String,
+    crossinline action: KtAnalysisSession.() -> R
+): R {
+    ApplicationManager.getApplication().assertIsDispatchThread()
+    val task = object : Task.WithResult<R, Exception>(contextElement.project, windowTitle, /*canBeCancelled*/ true) {
+        override fun compute(indicator: ProgressIndicator): R = analyzeWithReadAction(contextElement) { action() }
+    }
+    task.queue()
+    return task.result
 }
