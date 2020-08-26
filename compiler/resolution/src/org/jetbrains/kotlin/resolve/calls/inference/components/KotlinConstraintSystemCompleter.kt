@@ -6,11 +6,9 @@
 package org.jetbrains.kotlin.resolve.calls.inference.components
 
 import org.jetbrains.kotlin.resolve.calls.components.transformToResolvedLambda
-import org.jetbrains.kotlin.resolve.calls.inference.ConstraintSystemBuilder
 import org.jetbrains.kotlin.resolve.calls.inference.model.*
 import org.jetbrains.kotlin.resolve.calls.model.*
 import org.jetbrains.kotlin.types.*
-import org.jetbrains.kotlin.types.model.KotlinTypeMarker
 import org.jetbrains.kotlin.types.model.TypeConstructorMarker
 import org.jetbrains.kotlin.types.model.TypeVariableMarker
 import org.jetbrains.kotlin.types.model.safeSubstitute
@@ -24,34 +22,8 @@ class KotlinConstraintSystemCompleter(
 ) {
     private val postponedArgumentInputTypesResolver = PostponedArgumentInputTypesResolver(resultTypeResolver, variableFixationFinder)
 
-    enum class ConstraintSystemCompletionMode {
-        FULL,
-        PARTIAL,
-        UNTIL_FIRST_LAMBDA
-    }
-
-    interface Context : VariableFixationFinder.Context, ResultTypeResolver.Context {
-        val allTypeVariables: Map<TypeConstructorMarker, TypeVariableMarker>
-        override val notFixedTypeVariables: Map<TypeConstructorMarker, VariableWithConstraints>
-        override val postponedTypeVariables: List<TypeVariableMarker>
-
-        fun getBuilder(): ConstraintSystemBuilder
-
-        // type can be proper if it not contains not fixed type variables
-        fun canBeProper(type: KotlinTypeMarker): Boolean
-
-        fun containsOnlyFixedOrPostponedVariables(type: KotlinTypeMarker): Boolean
-
-        // mutable operations
-        fun addError(error: ConstraintSystemError)
-
-        fun fixVariable(variable: TypeVariableMarker, resultType: KotlinTypeMarker, atom: ResolvedAtom?)
-
-        fun asPostponedArgumentInputTypesResolverContext(): PostponedArgumentInputTypesResolver.Context
-    }
-
     fun runCompletion(
-        c: Context,
+        c: ConstraintSystemCompletionContext,
         completionMode: ConstraintSystemCompletionMode,
         topLevelAtoms: List<ResolvedAtom>,
         topLevelType: UnwrappedType,
@@ -69,7 +41,7 @@ class KotlinConstraintSystemCompleter(
     }
 
     fun completeConstraintSystem(
-        c: Context,
+        c: ConstraintSystemCompletionContext,
         topLevelType: UnwrappedType,
         topLevelAtoms: List<ResolvedAtom>,
         diagnosticsHolder: KotlinDiagnosticsHolder
@@ -85,7 +57,7 @@ class KotlinConstraintSystemCompleter(
         }
     }
 
-    private fun Context.runCompletion(
+    private fun ConstraintSystemCompletionContext.runCompletion(
         completionMode: ConstraintSystemCompletionMode,
         topLevelAtoms: List<ResolvedAtom>,
         topLevelType: UnwrappedType,
@@ -170,7 +142,7 @@ class KotlinConstraintSystemCompleter(
         }
     }
 
-    private fun Context.analyzeArgumentWithFixedParameterTypes(
+    private fun ConstraintSystemCompletionContext.analyzeArgumentWithFixedParameterTypes(
         postponedArguments: List<PostponedResolvedAtom>,
         analyze: (PostponedResolvedAtom) -> Unit
     ): Boolean {
@@ -184,7 +156,7 @@ class KotlinConstraintSystemCompleter(
         return false
     }
 
-    private fun Context.analyzeNextReadyPostponedArgument(
+    private fun ConstraintSystemCompletionContext.analyzeNextReadyPostponedArgument(
         postponedArguments: List<PostponedResolvedAtom>,
         completionMode: ConstraintSystemCompletionMode,
         analyze: (PostponedResolvedAtom) -> Unit
@@ -238,7 +210,7 @@ class KotlinConstraintSystemCompleter(
         return atom.transformToResolvedLambda(csBuilder, diagnosticsHolder, expectedType, returnVariable)
     }
 
-    private fun Context.hasLambdaToAnalyze(
+    private fun ConstraintSystemCompletionContext.hasLambdaToAnalyze(
         postponedArguments: List<PostponedResolvedAtom>
     ): Boolean {
         return analyzeArgumentWithFixedParameterTypes(postponedArguments) {}
@@ -247,11 +219,11 @@ class KotlinConstraintSystemCompleter(
     private fun findPostponedArgumentWithRevisableExpectedType(postponedArguments: List<PostponedResolvedAtom>) =
         postponedArguments.firstOrNull { argument -> argument is PostponedAtomWithRevisableExpectedType }
 
-    private fun Context.findPostponedArgumentWithFixedOrPostponedInputTypes(postponedArguments: List<PostponedResolvedAtom>) =
+    private fun ConstraintSystemCompletionContext.findPostponedArgumentWithFixedOrPostponedInputTypes(postponedArguments: List<PostponedResolvedAtom>) =
         postponedArguments.firstOrNull { argument -> argument.inputTypes.all { containsOnlyFixedOrPostponedVariables(it) } }
 
     private fun fixVariable(
-        c: Context,
+        c: ConstraintSystemCompletionContext,
         variableWithConstraints: VariableWithConstraints,
         topLevelAtoms: List<ResolvedAtom>
     ) {
@@ -259,7 +231,7 @@ class KotlinConstraintSystemCompleter(
     }
 
     private fun fixVariable(
-        c: Context,
+        c: ConstraintSystemCompletionContext,
         variableWithConstraints: VariableWithConstraints,
         direction: TypeVariableDirectionCalculator.ResolveDirection,
         topLevelAtoms: List<ResolvedAtom>
@@ -269,7 +241,7 @@ class KotlinConstraintSystemCompleter(
         c.fixVariable(variableWithConstraints.typeVariable, resultType, resolvedAtom)
     }
 
-    private fun Context.fixVariablesOrReportNotEnoughInformation(
+    private fun ConstraintSystemCompletionContext.fixVariablesOrReportNotEnoughInformation(
         completionMode: ConstraintSystemCompletionMode,
         topLevelAtoms: List<ResolvedAtom>,
         topLevelType: UnwrappedType,
@@ -303,7 +275,7 @@ class KotlinConstraintSystemCompleter(
     }
 
     private fun processVariableWhenNotEnoughInformation(
-        c: Context,
+        c: ConstraintSystemCompletionContext,
         variableWithConstraints: VariableWithConstraints,
         topLevelAtoms: List<ResolvedAtom>,
         diagnosticsHolder: KotlinDiagnosticsHolder
@@ -330,7 +302,7 @@ class KotlinConstraintSystemCompleter(
         c.fixVariable(typeVariable, resultErrorType, resolvedAtom)
     }
 
-    private fun Context.getOrderedAllTypeVariables(
+    private fun ConstraintSystemCompletionContext.getOrderedAllTypeVariables(
         collectVariablesFromContext: Boolean,
         topLevelAtoms: List<ResolvedAtom>
     ): List<TypeConstructorMarker> {
@@ -382,7 +354,7 @@ class KotlinConstraintSystemCompleter(
         return result.toList()
     }
 
-    private fun Context.isThereAnyReadyForFixationVariable(
+    private fun ConstraintSystemCompletionContext.isThereAnyReadyForFixationVariable(
         completionMode: ConstraintSystemCompletionMode,
         topLevelAtoms: List<ResolvedAtom>,
         topLevelType: UnwrappedType,

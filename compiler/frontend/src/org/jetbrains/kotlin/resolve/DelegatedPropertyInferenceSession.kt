@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.descriptors.VariableDescriptorWithAccessors
 import org.jetbrains.kotlin.resolve.calls.components.*
 import org.jetbrains.kotlin.resolve.calls.inference.ConstraintSystemBuilder
 import org.jetbrains.kotlin.resolve.calls.inference.NewConstraintSystem
+import org.jetbrains.kotlin.resolve.calls.inference.components.ConstraintSystemCompletionMode
 import org.jetbrains.kotlin.resolve.calls.inference.components.KotlinConstraintSystemCompleter
 import org.jetbrains.kotlin.resolve.calls.inference.model.ConstraintStorage
 import org.jetbrains.kotlin.resolve.calls.inference.model.DelegatedPropertyConstraintPositionImpl
@@ -114,7 +115,7 @@ class InferenceSessionForExistingCandidates(private val resolveReceiverIndepende
 
     override fun computeCompletionMode(
         candidate: KotlinResolutionCandidate
-    ): KotlinConstraintSystemCompleter.ConstraintSystemCompletionMode? = null
+    ): ConstraintSystemCompletionMode? = null
 
     override fun resolveReceiverIndependently(): Boolean = resolveReceiverIndependently
 }
