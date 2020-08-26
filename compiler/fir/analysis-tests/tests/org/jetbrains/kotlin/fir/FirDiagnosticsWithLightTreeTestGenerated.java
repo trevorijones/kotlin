@@ -1056,6 +1056,11 @@ public class FirDiagnosticsWithLightTreeTestGenerated extends AbstractFirDiagnos
             runTest("compiler/fir/analysis-tests/testData/resolve/diagnostics/sealedSupertype.kt");
         }
 
+        @TestMetadata("superCallWithDelegation.kt")
+        public void testSuperCallWithDelegation() throws Exception {
+            runTest("compiler/fir/analysis-tests/testData/resolve/diagnostics/superCallWithDelegation.kt");
+        }
+
         @TestMetadata("superIsNotAnExpression.kt")
         public void testSuperIsNotAnExpression() throws Exception {
             runTest("compiler/fir/analysis-tests/testData/resolve/diagnostics/superIsNotAnExpression.kt");
