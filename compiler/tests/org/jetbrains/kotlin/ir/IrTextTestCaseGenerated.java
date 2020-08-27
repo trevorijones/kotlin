@@ -1715,6 +1715,11 @@ public class IrTextTestCaseGenerated extends AbstractIrTextTestCase {
         public void testFirBuilder() throws Exception {
             runTest("compiler/testData/ir/irText/firProblems/FirBuilder.kt");
         }
+
+        @TestMetadata("kt4373.kt")
+        public void testKt4373() throws Exception {
+            runTest("compiler/testData/ir/irText/firProblems/kt4373.kt");
+        }
     }
 
     @TestMetadata("compiler/testData/ir/irText/lambdas")
